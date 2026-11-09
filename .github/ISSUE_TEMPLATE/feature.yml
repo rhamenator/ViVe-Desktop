@@ -1,0 +1,11 @@
+name: Feature request
+description: Suggest an improvement to ViVe Desktop
+body:
+  - type: textarea
+    attributes:
+      label: Problem and proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives and compatibility considerations

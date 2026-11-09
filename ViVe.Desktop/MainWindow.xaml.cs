@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Richard M. Hamilton. First public release: 2026-11-09.
+// SPDX-License-Identifier: GPL-3.0-only
 using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
@@ -18,6 +20,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<uint,string> names = new();
     private Dictionary<uint,EffectiveConfiguration> effective = new();
     private bool busy;
+    private bool changesThisSession;
+    private bool restartAfterClose;
     private bool restoringPreferences;
     private string? viewPreferencesPath;
     private List<SortPreference> activeSorts=new();
@@ -49,7 +53,19 @@ public partial class MainWindow : Window
         RestoreViewPreferences();
         Features.Sorting+=(_,_)=>Dispatcher.BeginInvoke(new Action(()=>activeSorts=ViewPreferencesStore.ReadSorts(Features)),System.Windows.Threading.DispatcherPriority.DataBind);
         Closed+=(_,_)=>SaveViewPreferences();
-        Closing+=(_,e)=>{if(busy) {e.Cancel=true;Write("Finish the current operation before closing or updating the app.");}};
+        Closing+=(_,e)=>{
+            if(busy) {e.Cancel=true;Write("Finish the current operation before closing or updating the app.");return;}
+            if(!RebootPlanning.ShouldPrompt(changesThisSession,busy)) return;
+            var prompt=new RebootDialog {Owner=this};prompt.ShowDialog();
+            if(prompt.Choice==RestartChoice.KeepOpen) {e.Cancel=true;return;}
+            restartAfterClose=prompt.Choice==RestartChoice.RestartNow;
+            changesThisSession=false;
+        };
+        Closed+=(_,_)=>{
+            if(!restartAfterClose) return;
+            try {Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,"shutdown.exe"),"/r /t 0") {UseShellExecute=false,CreateNoWindow=true});}
+            catch(Exception ex) {MessageBox.Show("Windows could not start the reboot. Restart it manually.\n\n"+ex.Message,"Restart did not start",MessageBoxButton.OK,MessageBoxImage.Exclamation);}
+        };
         try {
             foreach(var pair in DictionaryUpdater.Read(Path.Combine(AppContext.BaseDirectory,"FeatureDictionary.pfs"))) names[pair.Key]=pair.Value;
             if(File.Exists(DictionaryUpdater.CachePath)) {
@@ -265,8 +281,11 @@ public partial class MainWindow : Window
         try {
             if(!Admin) throw new InvalidOperationException("Administrator access is required.");
             var id=ReadId();
+            var update=new RTL_FEATURE_CONFIGURATION_UPDATE {FeatureId=id,Priority=RTL_FEATURE_CONFIGURATION_PRIORITY.User,EnabledState=state,Operation=reset ? RTL_FEATURE_CONFIGURATION_OPERATION.ResetState : RTL_FEATURE_CONFIGURATION_OPERATION.FeatureState};
+            var need=RebootPlanning.Needed(update);
+            if(!need.Any) {Write($"Feature {id}: requested overrides already match in Runtime and Boot. No change was made.");return;}
             var action=reset ? "Remove the User-priority override for" : $"Set {state} for";
-            if(MessageBox.Show(this,$"{action} feature {id} in BOTH Runtime and Boot?\n\nThe browsing-store selector does not limit changes. Other priorities are preserved. You must reboot Windows for restart-dependent features to take effect.","Confirm feature change",MessageBoxButton.OKCancel,MessageBoxImage.Warning)!=MessageBoxResult.OK) return;
+            if(MessageBox.Show(this,$"{action} feature {id} in BOTH Runtime and Boot?\n\nThe browsing-store selector does not limit changes. Other priorities are preserved.","Confirm feature change",MessageBoxButton.OKCancel,MessageBoxImage.Warning)!=MessageBoxResult.OK) return;
             busy=true; IsEnabled=false;
             var folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ViVeDesktop","Snapshots");
             Directory.CreateDirectory(folder);
@@ -274,16 +293,17 @@ public partial class MainWindow : Window
             // Capture BOTH stores before either one is changed.
             SaveSnapshot(prefix+"-Runtime.json",RTL_FEATURE_CONFIGURATION_TYPE.Runtime);
             SaveSnapshot(prefix+"-Boot.json",RTL_FEATURE_CONFIGURATION_TYPE.Boot);
-            var update=new RTL_FEATURE_CONFIGURATION_UPDATE {FeatureId=id,Priority=RTL_FEATURE_CONFIGURATION_PRIORITY.User,EnabledState=state,Operation=reset ? RTL_FEATURE_CONFIGURATION_OPERATION.ResetState : RTL_FEATURE_CONFIGURATION_OPERATION.FeatureState};
+
             attempted=true;
             var result=await Task.Run(()=>FeatureChanges.SaveBoth(update));
+            changesThisSession |= need.WasChanged(result);
             Write($"Feature {id}: {result.Description} Pre-change snapshots: {prefix}-Runtime.json and {prefix}-Boot.json");
             if(!result.Saved) {
                 MessageBox.Show(this,result.Description+"\n\nThe change was not fully saved. See the activity log and snapshots.","Feature change failed",MessageBoxButton.OK,MessageBoxImage.Error);
                 return;
             }
             RestartNotice.Text="Restart required: reboot Windows to apply feature changes.";
-            MessageBox.Show(this,$"Feature {id} was saved to Runtime and Boot.\n\nREBOOT WINDOWS for this change to take full effect.\n\n{(result.BootMarkerStatus!=0 ? result.Description+"\n\n" : "")}Windows will not restart automatically.","Restart required",MessageBoxButton.OK,MessageBoxImage.Exclamation);
+            if(result.BootMarkerStatus!=0) Write(result.Description);
         } catch(Exception ex) { Write(ex.Message); MessageBox.Show(this,ex.Message,"Unable to complete change",MessageBoxButton.OK,MessageBoxImage.Error); }
         finally {
             busy=false; IsEnabled=true;

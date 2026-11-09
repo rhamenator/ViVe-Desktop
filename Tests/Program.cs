@@ -28,7 +28,7 @@ Assert(absent.OtherStore==RTL_FEATURE_CONFIGURATION_TYPE.Boot,"Lookup identifies
 if(absent.Configuration==null) Assert(absent.Status!=0,"Missing configuration preserves native status");
 
 var reported=ViVe.Desktop.FeatureLookup.Query(61934903,RTL_FEATURE_CONFIGURATION_TYPE.Runtime);
-Assert(reported.Configuration?.FeatureId==61934903,"User-reported ID 61934903 resolves in Runtime");
+if(reported.Configuration is {} reportedConfig) Assert(reportedConfig.FeatureId==61934903,"Known ID resolves when present on this build");
 Console.WriteLine($"Reported ID: state={reported.Configuration?.EnabledState}, priority={reported.Configuration?.Priority}");
 
 Assert(ViVe.Desktop.FeatureLookup.FindClosest(new uint[]{61934903,61934904,62000000},61934903)==61934903,"Closest match prefers exact ID");
@@ -113,3 +113,11 @@ var defaultLayer=effectiveRow with {Priority="ImageDefault",State="Disabled"};
 var summaryRows=ViVe.Desktop.FeaturePresentation.VisibleRows(new[]{defaultLayer,userLayer},false);
 Assert(summaryRows.Count==1 && summaryRows[0].Priority=="User" && summaryRows[0].EffectiveState=="Enabled","Default view shows one resolved row instead of contradictory priority rows");
 Assert(ViVe.Desktop.FeaturePresentation.VisibleRows(new[]{defaultLayer,userLayer},true).Count==2,"Advanced view retains original priority layers");
+
+
+Assert(!ViVe.Desktop.RebootPlanning.ShouldPrompt(false,false),"No reboot prompt without session changes");
+Assert(!ViVe.Desktop.RebootPlanning.ShouldPrompt(true,true),"Busy operation defers exit/reboot prompt");
+Assert(ViVe.Desktop.RebootPlanning.ShouldPrompt(true,false),"Changed session gets exit reboot choice");
+Assert(!new ViVe.Desktop.ChangeNeed(false,false).WasChanged(new(0,0,0)),"No-op requests do not trigger reboot decision");
+Assert(new ViVe.Desktop.ChangeNeed(true,false).WasChanged(new(0,-1,null)),"Runtime change retains reboot decision after Boot failure");
+Assert(!new ViVe.Desktop.ChangeNeed(false,true).WasChanged(new(0,-1,null)),"Failed Boot-only change does not claim an actual change");

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Richard M. Hamilton. First public release: 2026-11-09.
+// SPDX-License-Identifier: GPL-3.0-only
 using Albacore.ViVe.NativeEnums;
 using Albacore.ViVe.NativeMethods;
 using Albacore.ViVe.NativeStructs;

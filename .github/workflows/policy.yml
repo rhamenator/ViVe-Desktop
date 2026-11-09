@@ -1,0 +1,42 @@
+name: Repository policy
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Required metadata and no local/private artifacts
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,subprocess
+          required=['README.md','LICENSE','COPYRIGHT','SECURITY.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','CHANGELOG.md','SUPPORT.md','THIRD-PARTY-NOTICES.md','.github/CODEOWNERS']
+          assert all(pathlib.Path(p).is_file() for p in required)
+          files=subprocess.check_output(['git','ls-files'],text=True).splitlines()
+          forbidden=re.compile(r'(^|/)(window-layout\.json|view-preferences\.json|Snapshots|\.env)(/|$)|\.(pfx|p12|key)$',re.I)
+          secrets=re.compile(r'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+          for f in files:
+              assert not forbidden.search(f),f'Private/local artifact: {f}'
+              b=pathlib.Path(f).read_bytes()
+              if b'\0' not in b: assert not secrets.search(b.decode('utf-8',errors='replace')),f'Possible secret: {f}'
+          assert 'Richard M. Hamilton' in pathlib.Path('COPYRIGHT').read_text()
+          print('Repository metadata and source artifact checks passed.')
+          PY
+      - name: DCO sign-offs for new PR commits
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import os,re,subprocess
+          base,head=os.environ['BASE'],os.environ['HEAD']
+          assert re.fullmatch('[a-f0-9]{40}',base) and re.fullmatch('[a-f0-9]{40}',head)
+          for sha in subprocess.check_output(['git','rev-list',base+'..'+head],text=True).split():
+              msg=subprocess.check_output(['git','show','-s','--format=%B',sha],text=True)
+              assert re.search(r'^Signed-off-by: .+ <[^>]+>$',msg,re.M),f'Missing DCO sign-off: {sha}'
+          PY

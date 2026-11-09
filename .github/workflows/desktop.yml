@@ -1,0 +1,63 @@
+name: Desktop build
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    name: Desktop build and tests
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build ViVe.sln -c Release --nologo
+      - run: dotnet run --project Tests/Tests.csproj -c Release
+      - run: dotnet run --project LayoutTests/LayoutTests.csproj -c Release
+      - run: ./build/Publish-Desktop.ps1
+      - name: Compile installer on GitHub runner
+        shell: pwsh
+        run: |
+          $compiler=Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup*/ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if(!$compiler) {
+            choco install innosetup --yes --no-progress
+            if($LASTEXITCODE){throw 'Inno Setup installation failed.'}
+            $compiler=Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup*/ISCC.exe" | Select-Object -First 1
+          }
+          & $compiler.FullName "/DPayloadDir=$pwd/artifacts/desktop" "/DOutputDir=$pwd/artifacts/release" packaging/ViVeDesktop.iss
+          if($LASTEXITCODE){throw 'Installer compilation failed.'}
+      - name: Installer smoke test (disposable CI runner only)
+        shell: pwsh
+        run: |
+          $setup=Get-ChildItem artifacts/release/*Setup-x64.exe | Select-Object -First 1
+          $destination=Join-Path $env:RUNNER_TEMP 'vive-installer-smoke'
+          $process=Start-Process $setup.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',('/DIR="'+$destination+'"')) -Wait -PassThru
+          if($process.ExitCode -ne 0 -or !(Test-Path "$destination/ViVe.Desktop.exe")){throw 'Installer smoke test failed.'}
+          $uninstall=Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if($uninstall.ExitCode -ne 0){throw 'Uninstaller failed.'}
+      - shell: pwsh
+        run: Get-ChildItem artifacts/release -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content artifacts/release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ViVe-Desktop-Windows-x64
+          path: artifacts/release/*
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --name ViVe-Desktop-Windows-x64 --dir release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "ViVe Desktop ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md
