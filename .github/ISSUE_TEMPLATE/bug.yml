@@ -1,4 +1,4 @@
-name: "Report a ViVeTool bug"
+name: "Report a ViVe Desktop bug"
 description: Experiencing unexpected crashes or unintended behavior? File a report here!
 labels: ["bug"]
 body:
@@ -14,8 +14,8 @@ body:
   - type: input
     id: tool-version
     attributes:
-      label: Tool version
-      description: Which version of ViVeTool is this report for?
+      label: ViVe Desktop version
+      description: Which version of ViVe Desktop is this report for?
       placeholder: e.g. v0.3.3
     validations:
       required: true

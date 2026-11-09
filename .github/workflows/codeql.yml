@@ -1,0 +1,27 @@
+name: CodeQL
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  analyze:
+    name: CodeQL CSharp
+    if: github.event.repository.private == false
+    runs-on: windows-2025
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: '10.0.x'
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          languages: csharp
+          build-mode: manual
+      - run: dotnet build ViVe.Desktop/ViVe.Desktop.csproj -c Release --nologo
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066

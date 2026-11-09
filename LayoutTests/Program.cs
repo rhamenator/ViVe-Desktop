@@ -55,12 +55,12 @@ internal class Probe {
     first.Show();first.UpdateLayout();
     first.Dispatcher.Invoke(()=>{},System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     if(Math.Abs(restoredShare-.62)>.001) throw new Exception("Divider was not restored.");
-    first.Width=1140; first.Height=760; first.Left=120;first.Top=90;first.UpdateLayout();
+    first.Width=Math.Min(900,SystemParameters.WorkArea.Width-80); first.Height=Math.Min(700,SystemParameters.WorkArea.Height-80); first.Left=SystemParameters.WorkArea.Left+20;first.Top=SystemParameters.WorkArea.Top+20;first.UpdateLayout();
     first.Dispatcher.Invoke(()=>{},System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     first.Close();
    }
    var before=WindowLayoutStore.Load(temp) ?? throw new Exception("Window did not save layout.");
-   if(Math.Abs(before.Width-1140)>2 || Math.Abs(before.Height-760)>2) throw new Exception($"Wrong saved window size: {before}");
+   if(Math.Abs(before.Width-Math.Min(900,SystemParameters.WorkArea.Width-80))>2 || Math.Abs(before.Height-Math.Min(700,SystemParameters.WorkArea.Height-80))>2) throw new Exception($"Wrong saved window size: {before}");
    var next=new Window {Width=900,Height=700};
    using(var controller=new WindowLayoutController(next,temp,()=>.62,share=>restoredShare=share)) {
     next.Show();next.UpdateLayout();
@@ -133,3 +133,4 @@ internal class Probe {
   app.Shutdown();
  }
 }
+

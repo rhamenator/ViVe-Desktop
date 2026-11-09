@@ -35,7 +35,12 @@ $certificate="$output/ViVe-Desktop-Sideload-Test.cer"
 Export-Certificate -Cert $cert -FilePath $certificate | Out-Null
 & $signtool sign /fd SHA256 /s My /sha1 $cert.Thumbprint $signed
 if($LASTEXITCODE){throw 'Test package signing failed.'}
-& $signtool verify /pa $signed
+$verification=(& $signtool verify /pa $signed 2>&1 | Out-String)
+Write-Output $verification
+if($LASTEXITCODE -ne 0 -and $verification -notmatch '(?s)root.*certificate which is not trusted') {throw 'Unexpected signature verification failure.'}
+$signature=Get-AuthenticodeSignature $signed
+if($signature.SignerCertificate.Thumbprint -ne $cert.Thumbprint){throw 'Package signer does not match the generated test certificate.'}
+$global:LASTEXITCODE=0
 # Self-signed CI certificates are deliberately not installed into a trusted root.
 @"
 ViVe Desktop MSIX builds
@@ -57,3 +62,4 @@ This app requires runFullTrust and allowElevation. Microsoft Store approval of
 restricted capabilities is still required. No submission has been performed.
 "@ | Set-Content "$output/README-STORE.txt"
 Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($cert.Thumbprint)"
+
