@@ -247,3 +247,26 @@ retained its original PID; v1.6 then closed v1.5 normally and opened; duplicate 
 and older v1.5 launches both retained the v1.6 PID with only one GUI instance.
 Preference tests cover restoration, multicolumn sort, pixel/star widths,
 filtering without losing sort, close/save and corrupt-file fallback.
+
+## Reset Layout and authorized live disable test (1.7.1)
+
+Reset Layout restores the default 1300x800 normal window, centered on the current
+monitor (clamped to available space), the default 2.2:1 table/log split, original
+column widths/order, no sorting, Runtime browsing, effective-state scope, all
+states/priorities, empty search/variant/ID and hidden priority details.
+Defaults are saved immediately. It does not change feature configurations or
+the feature dictionary.
+
+The startup reminder detects BootPending so a needed reboot remains visible
+after the app is reopened. Boot browsing is labeled Boot snapshot because the
+query can still show the current boot's older state while a different override
+has already been saved for the next boot.
+
+Authorized live verification on November 9, 2026 disabled ONLY 61934903 and
+60813048 using the exact FeatureChanges.SaveBoth implementation used by Disable.
+Both returned zero Runtime/Boot/BootPending status, the persistent User override
+read back EnabledState=1 (Disabled), and an independent CLI query reported both
+Disabled at User priority. Pre-change snapshots are retained locally.
+The elevated GUI did not accept automated focus/input, so this verifies the
+write service rather than a simulated button click. Visual OS behavior still
+requires the user's reboot; no reboot was performed.

@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private bool restoringPreferences;
     private string? viewPreferencesPath;
     private List<SortPreference> activeSorts=new();
+    private readonly Dictionary<string,DataGridLength> defaultWidths=new();
     private bool Admin => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     private RTL_FEATURE_CONFIGURATION_TYPE CurrentStore => Store.SelectedIndex == 1 ? RTL_FEATURE_CONFIGURATION_TYPE.Boot : RTL_FEATURE_CONFIGURATION_TYPE.Runtime;
     private readonly WindowLayoutController? layoutController;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     public MainWindow(string? layoutPath)
     {
         InitializeComponent();
+        foreach(var column in Features.Columns) defaultWidths[column.SortMemberPath]=column.Width;
         if(layoutPath!=null) layoutController=new WindowLayoutController(this,layoutPath,
             ()=>TableRegion.ActualHeight+LogRegion.ActualHeight>0 ? TableRegion.ActualHeight/(TableRegion.ActualHeight+LogRegion.ActualHeight) : .75,
             share=>{TableRegion.Height=new GridLength(share,GridUnitType.Star);LogRegion.Height=new GridLength(1-share,GridUnitType.Star);});
@@ -57,6 +59,10 @@ public partial class MainWindow : Window
         } catch(Exception ex) { Write("Dictionary unavailable: "+ex.Message); }
         EnableButton.IsEnabled = DisableButton.IsEnabled = ResetButton.IsEnabled = Admin;
         Write("Administrator access active. Changes are saved to both Runtime and Boot. Restart Windows after changing features.");
+        try {
+            if(FeatureManager.GetBootFeatureConfigurationState(out var bootStatus)==0 && bootStatus==BSD_FEATURE_CONFIGURATION_STATE.BootPending)
+                RestartNotice.Text="Restart required: saved boot overrides are pending. Reboot Windows to apply them.";
+        } catch { }
         Loaded += async (_,_) => await LoadFeatures();
     }
     private void RestoreViewPreferences()
@@ -94,6 +100,28 @@ public partial class MainWindow : Window
                 ShowPriorityDetails.IsChecked==true,columns,activeSorts));
         } catch { }
     }
+    public async Task ResetLayoutToDefaults()
+    {
+        if(busy) return;
+        restoringPreferences=true;
+        try {
+            activeSorts.Clear();
+            Store.SelectedIndex=0;StateScope.SelectedIndex=0;StateFilter.SelectedIndex=0;PriorityFilter.SelectedIndex=0;
+            Search.Clear();VariantFilter.Clear();FeatureId.Clear();ShowPriorityDetails.IsChecked=false;
+            int index=0;
+            foreach(var column in Features.Columns) {
+                column.Width=defaultWidths[column.SortMemberPath];column.SortDirection=null;column.DisplayIndex=index++;
+            }
+            TableRegion.Height=new GridLength(2.2,GridUnitType.Star);LogRegion.Height=new GridLength(1,GridUnitType.Star);
+            if(layoutController!=null) layoutController.ResetToDefaults();
+            else {WindowState=WindowState.Normal;Width=1300;Height=800;}
+        } finally {restoringPreferences=false;}
+        if(IsLoaded) await LoadFeatures(); else ApplyFilter();
+        UpdateLayout();
+        SaveViewPreferences();layoutController?.SaveCurrent();
+        Write("Default window size, divider, columns, sort order and filters restored.");
+    }
+    private async void ResetLayout(object sender,RoutedEventArgs e)=>await ResetLayoutToDefaults();
     private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => EffectiveStates.Apply(new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload),effective.GetValueOrDefault(c.FeatureId,new("Unknown","Unavailable",null,"Not resolved by Windows.")));
     private void Write(string message) { Log.AppendText($"[{DateTime.Now:T}] {message}{Environment.NewLine}"); Log.ScrollToEnd(); }
     private async Task LoadFeatures()
@@ -173,7 +201,7 @@ public partial class MainWindow : Window
     }
     private void Selected(object s,SelectionChangedEventArgs e) { if(Features.SelectedItem is FeatureRow row) FeatureId.Text=row.Id.ToString(); }
     private async void Refresh(object s,RoutedEventArgs e)=>await LoadFeatures();
-    private async void StoreChanged(object s,SelectionChangedEventArgs e) { if(IsLoaded) await LoadFeatures(); }
+    private async void StoreChanged(object s,SelectionChangedEventArgs e) { if(IsLoaded && !restoringPreferences) await LoadFeatures(); }
     private uint ReadId()
     {
         if(!uint.TryParse(FeatureId.Text.Trim(),out var id) || id==0) throw new ArgumentException("Enter a positive 32-bit feature ID.");

@@ -107,6 +107,19 @@ internal class Probe {
    configured.Close();
    var roundtrip=ViewPreferencesStore.Load(prefsPath) ?? throw new Exception("View preferences were not saved.");
    if(roundtrip.Search!="context" || roundtrip.Store!=1 || !roundtrip.Sorts.SequenceEqual(prefs.Sorts) || !roundtrip.Columns.Any(c=>c.Key=="Id" && c.Width==155)) throw new Exception("View preferences did not survive close.");
+   var resetting=new MainWindow(temp);
+   resetting.Width=1000;resetting.Height=740;
+   resetting.ResetLayoutToDefaults().GetAwaiter().GetResult();
+   var defaults=ViewPreferencesStore.Load(prefsPath) ?? throw new Exception("Reset did not save default view.");
+   if(resetting.Width!=1300 || resetting.Height!=800 || resetting.WindowState!=WindowState.Normal ||
+      defaults.Search!="" || defaults.Store!=0 || defaults.StateScope!=0 || defaults.State!="All states" ||
+      defaults.Priority!="All priorities" || defaults.Variant!="" || defaults.Details || defaults.Sorts.Count!=0 ||
+      !defaults.Columns.Any(c=>c.Key=="Id" && c.Width==110) ||
+      !defaults.Columns.Any(c=>c.Key=="Name" && c.Unit==DataGridLengthUnitType.Star && c.Width==1) ||
+      Math.Abs(((RowDefinition)resetting.FindName("TableRegion")).Height.Value/(((RowDefinition)resetting.FindName("TableRegion")).Height.Value+((RowDefinition)resetting.FindName("LogRegion")).Height.Value)-2.2/3.2)>.001)
+       throw new Exception($"Reset Layout did not restore all defaults: {System.Text.Json.JsonSerializer.Serialize(defaults)} window={resetting.Width}x{resetting.Height} state={resetting.WindowState} table={((RowDefinition)resetting.FindName("TableRegion")).Height}");
+   resetting.Close();
+   Console.WriteLine("PASS: Reset Layout restores and saves default window size, divider weights, column widths, sorting and filters.");
    System.IO.File.WriteAllText(prefsPath,"bad json");
    if(ViewPreferencesStore.Load(prefsPath)!=null) throw new Exception("Corrupt view settings were accepted.");
    System.IO.File.Delete(prefsPath);

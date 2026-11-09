@@ -56,14 +56,34 @@ public sealed class WindowLayoutController : IDisposable
         if(hwnd!=IntPtr.Zero && GetWindowPlacement(hwnd,ref placement) && placement.ShowCommand==1 && GetWindowRect(hwnd,out var r) && r.Right>r.Left && r.Bottom>r.Top)
             normalBounds=new Rect(r.Left,r.Top,r.Right-r.Left,r.Bottom-r.Top);
     }
-    private void Save(object? sender,EventArgs e)
+    public void ResetToDefaults()
+    {
+        window.WindowState=WindowState.Normal;
+        window.MinWidth=980;window.MinHeight=720;
+        restoreShare(2.2/3.2);
+        var hwnd=new WindowInteropHelper(window).Handle;
+        if(hwnd==IntPtr.Zero) {window.Width=1300;window.Height=800;return;}
+        var dpi=Math.Max(96,GetDpiForWindow(hwnd))/96d;
+        var areas=WorkAreas();
+        GetWindowRect(hwnd,out var current);
+        var currentRect=new Rect(current.Left,current.Top,Math.Max(1,current.Right-current.Left),Math.Max(1,current.Bottom-current.Top));
+        var fitted=WindowLayoutStore.Fit(currentRect,areas);
+        var area=areas.FirstOrDefault(r=>r.Contains(new Point(fitted.Left+fitted.Width/2,fitted.Top+fitted.Height/2)));
+        if(area.IsEmpty || area.Width<=0) area=new Rect(0,0,1300*dpi,800*dpi);
+        var target=WindowLayoutStore.Fit(new Rect(area.Left+(area.Width-1300*dpi)/2,area.Top+(area.Height-800*dpi)/2,1300*dpi,800*dpi),areas);
+        window.MinWidth=Math.Min(980,target.Width/dpi);window.MinHeight=Math.Min(720,target.Height/dpi);
+        SetWindowPos(hwnd,IntPtr.Zero,(int)target.Left,(int)target.Top,(int)target.Width,(int)target.Height,0x0014);
+        normalBounds=target;lastMaximized=false;
+    }
+    public void SaveCurrent()
     {
         try {
+            RememberNormal(null,EventArgs.Empty);
             if(!normalBounds.IsEmpty && normalBounds.Width>=200 && normalBounds.Height>=200)
                 WindowLayoutStore.Save(path,new(2,normalBounds.Left,normalBounds.Top,normalBounds.Width,normalBounds.Height,lastMaximized,Math.Clamp(tableShare(),.25,.9)));
-        } catch { /* A failed layout write must not prevent the application from closing. */ }
-        Dispose();
+        } catch { }
     }
+    private void Save(object? sender,EventArgs e) {SaveCurrent();Dispose();}
     private static List<Rect> WorkAreas()
     {
         var result=new List<Rect>();
