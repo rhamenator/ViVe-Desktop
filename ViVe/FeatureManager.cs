@@ -1,4 +1,4 @@
-﻿/*
+/*
     ViVe - Windows feature configuration library
     Copyright (C) 2019-2025  @thebookisclosed
 
@@ -174,15 +174,15 @@ namespace Albacore.ViVe
         {
             try
             {
-                using (var rKey = Registry.LocalMachine.OpenSubKey(@"CurrentControlSet\Control\FeatureManagement\LastKnownGood"))
+                using (var rKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FeatureManagement\LastKnownGood", true))
                 {
-                    var lkgBlob = (byte[])rKey.GetValue("LKGConfiguration");
+                    var lkgBlob = rKey?.GetValue("LKGConfiguration") as byte[]; if (lkgBlob == null || lkgBlob.Length < sizeof(int)) return false;
                     // Header is a simple 32-bit zero
                     if (BitConverter.ToInt32(lkgBlob, 0) == 0)
                         return false;
                     var headerSize = sizeof(int);
                     var oneConfigSize = Marshal.SizeOf(typeof(RTL_FEATURE_CONFIGURATION));
-                    var fixedBlob = new byte[lkgBlob.Length - oneConfigSize];
+                    if (lkgBlob.Length < headerSize + oneConfigSize || (lkgBlob.Length - headerSize) % oneConfigSize != 0) return false; var fixedBlob = new byte[lkgBlob.Length - oneConfigSize];
                     Array.Copy(lkgBlob, headerSize + oneConfigSize, fixedBlob, headerSize, fixedBlob.Length - headerSize);
                     rKey.SetValue("LKGConfiguration", fixedBlob);
                     return true;
@@ -218,11 +218,11 @@ namespace Albacore.ViVe
                     {
                         if (isUserPolicy)
                         {
-                            var rKey = Registry.LocalMachine.OpenSubKey(overrideKey);
+                            var rKey = Registry.LocalMachine.OpenSubKey(overrideKey, true);
                             if (rKey != null)
                             {
                                 using (rKey)
-                                    rKey.DeleteValue(obfuscatedId);
+                                    rKey.DeleteValue(obfuscatedId, false);
                             }
                         }
                         else
@@ -315,3 +315,4 @@ namespace Albacore.ViVe
         }
     }
 }
+
