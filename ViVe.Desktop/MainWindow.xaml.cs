@@ -20,9 +20,14 @@ public partial class MainWindow : Window
     private bool busy;
     private bool Admin => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     private RTL_FEATURE_CONFIGURATION_TYPE CurrentStore => Store.SelectedIndex == 1 ? RTL_FEATURE_CONFIGURATION_TYPE.Boot : RTL_FEATURE_CONFIGURATION_TYPE.Runtime;
-    public MainWindow()
+    private readonly WindowLayoutController? layoutController;
+    public MainWindow() : this(WindowLayoutStore.DefaultPath) { }
+    public MainWindow(string? layoutPath)
     {
         InitializeComponent();
+        if(layoutPath!=null) layoutController=new WindowLayoutController(this,layoutPath,
+            ()=>TableRegion.ActualHeight+LogRegion.ActualHeight>0 ? TableRegion.ActualHeight/(TableRegion.ActualHeight+LogRegion.ActualHeight) : .75,
+            share=>{TableRegion.Height=new GridLength(share,GridUnitType.Star);LogRegion.Height=new GridLength(1-share,GridUnitType.Star);});
         PriorityFilter.ItemsSource=new[]{"All priorities"}.Concat(Enum.GetNames<RTL_FEATURE_CONFIGURATION_PRIORITY>()).ToArray();
         PriorityFilter.SelectedIndex=0;
         try {

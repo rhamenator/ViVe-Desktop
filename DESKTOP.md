@@ -198,3 +198,22 @@ To repeat the noninteractive WPF layout checks:
 The layout checks measure/arrange the window content without showing the window
 or writing Windows features. Single-instance startup was also checked by launching
 the installed elevated executable twice and confirming only the first PID remains.
+
+## Remembered layout and taller log (1.5.0)
+
+Window size, position, maximized state and the table/log split are saved on normal
+close to %LOCALAPPDATA%\ViVeDesktop\window-layout.json and restored on launch.
+Normal restore bounds are kept while maximized or minimized. Closing minimized
+does not make the next launch start minimized.
+
+Bounds are stored in native screen pixels and clamped to a current monitor's work
+area if a display is removed or resolution changes. Invalid, missing or corrupt
+settings fall back to defaults. Settings are local and are not uploaded.
+
+The default table/log allocation is now 3:1 instead of 4:1, and the log has a
+100-pixel minimum instead of 70. Saved proportions override these defaults.
+Drag the divider to choose your own balance; it is remembered on close.
+
+Layout tests now include actual window close/reopen, position and size round trips,
+maximized and minimized-state handling, divider persistence, corrupt-file fallback
+and disconnected-monitor recovery. Test windows use temporary settings files.
