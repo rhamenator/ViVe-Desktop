@@ -78,8 +78,7 @@ public partial class MainWindow : Window
             if(result.Configuration is {} config)
             {
                 var row=Row(config);
-                rows.RemoveAll(r=>r.Id==id);
-                rows.Add(row);
+                var existing=rows.FindIndex(r=>r.Id==id && r.Priority==row.Priority); if(existing>=0) rows[existing]=row; else rows.Add(row);
                 rows=rows.OrderBy(r=>r.Id).ToList();
                 Search.Text=id.ToString();
                 ApplyFilter();
