@@ -18,6 +18,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<uint,string> names = new();
     private Dictionary<uint,EffectiveConfiguration> effective = new();
     private bool busy;
+    private bool restoringPreferences;
+    private string? viewPreferencesPath;
+    private List<SortPreference> activeSorts=new();
     private bool Admin => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     private RTL_FEATURE_CONFIGURATION_TYPE CurrentStore => Store.SelectedIndex == 1 ? RTL_FEATURE_CONFIGURATION_TYPE.Boot : RTL_FEATURE_CONFIGURATION_TYPE.Runtime;
     private readonly WindowLayoutController? layoutController;
@@ -28,8 +31,23 @@ public partial class MainWindow : Window
         if(layoutPath!=null) layoutController=new WindowLayoutController(this,layoutPath,
             ()=>TableRegion.ActualHeight+LogRegion.ActualHeight>0 ? TableRegion.ActualHeight/(TableRegion.ActualHeight+LogRegion.ActualHeight) : .75,
             share=>{TableRegion.Height=new GridLength(share,GridUnitType.Star);LogRegion.Height=new GridLength(1-share,GridUnitType.Star);});
+        var previousLayout=layoutPath==null ? null : WindowLayoutStore.Load(layoutPath);
+        if(previousLayout?.Version==1) Loaded+=(_,_)=>{
+            var total=TableRegion.ActualHeight+LogRegion.ActualHeight;
+            if(total>0) {
+                var logHeight=Math.Max(LogRegion.ActualHeight,total*(1-previousLayout.TableShare)+36);
+                var share=Math.Clamp((total-logHeight)/total,.25,.9);
+                TableRegion.Height=new GridLength(share,GridUnitType.Star);
+                LogRegion.Height=new GridLength(1-share,GridUnitType.Star);
+            }
+        };
         PriorityFilter.ItemsSource=new[]{"All priorities"}.Concat(Enum.GetNames<RTL_FEATURE_CONFIGURATION_PRIORITY>()).ToArray();
         PriorityFilter.SelectedIndex=0;
+        viewPreferencesPath=layoutPath==null ? null : Path.Combine(Path.GetDirectoryName(layoutPath)!,"view-preferences.json");
+        RestoreViewPreferences();
+        Features.Sorting+=(_,_)=>Dispatcher.BeginInvoke(new Action(()=>activeSorts=ViewPreferencesStore.ReadSorts(Features)),System.Windows.Threading.DispatcherPriority.DataBind);
+        Closed+=(_,_)=>SaveViewPreferences();
+        Closing+=(_,e)=>{if(busy) {e.Cancel=true;Write("Finish the current operation before closing or updating the app.");}};
         try {
             foreach(var pair in DictionaryUpdater.Read(Path.Combine(AppContext.BaseDirectory,"FeatureDictionary.pfs"))) names[pair.Key]=pair.Value;
             if(File.Exists(DictionaryUpdater.CachePath)) {
@@ -40,6 +58,41 @@ public partial class MainWindow : Window
         EnableButton.IsEnabled = DisableButton.IsEnabled = ResetButton.IsEnabled = Admin;
         Write("Administrator access active. Changes are saved to both Runtime and Boot. Restart Windows after changing features.");
         Loaded += async (_,_) => await LoadFeatures();
+    }
+    private void RestoreViewPreferences()
+    {
+        if(viewPreferencesPath==null) return;
+        var saved=ViewPreferencesStore.Load(viewPreferencesPath);
+        if(saved==null) return;
+        restoringPreferences=true;
+        try {
+            Store.SelectedIndex=saved.Store;
+            StateScope.SelectedIndex=saved.StateScope;
+            foreach(var item in StateFilter.Items.OfType<ComboBoxItem>())
+                if((string)item.Content==saved.State) {StateFilter.SelectedItem=item;break;}
+            if(PriorityFilter.Items.Contains(saved.Priority)) PriorityFilter.SelectedItem=saved.Priority;
+            Search.Text=saved.Search;
+            VariantFilter.Text=saved.Variant;
+            ShowPriorityDetails.IsChecked=saved.Details;
+            activeSorts=saved.Sorts;
+            foreach(var preference in saved.Columns) {
+                var column=Features.Columns.FirstOrDefault(c=>c.SortMemberPath==preference.Key);
+                if(column!=null) column.Width=new DataGridLength(preference.Width,preference.Unit);
+            }
+        } finally {restoringPreferences=false;}
+    }
+    private void SaveViewPreferences()
+    {
+        if(viewPreferencesPath==null) return;
+        try {
+            // Capture the live view as well, including a header click immediately before closing.
+            activeSorts=ViewPreferencesStore.ReadSorts(Features);
+            var columns=Features.Columns.Where(c=>ViewPreferencesStore.Keys.Contains(c.SortMemberPath))
+                .Select(c=>new ColumnPreference(c.SortMemberPath,c.Width.Value,c.Width.UnitType)).ToList();
+            ViewPreferencesStore.Save(viewPreferencesPath,new(1,Search.Text,Store.SelectedIndex,StateScope.SelectedIndex,
+                SelectedFilter(StateFilter,"All states"),SelectedFilter(PriorityFilter,"All priorities"),VariantFilter.Text,
+                ShowPriorityDetails.IsChecked==true,columns,activeSorts));
+        } catch { }
     }
     private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => EffectiveStates.Apply(new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload),effective.GetValueOrDefault(c.FeatureId,new("Unknown","Unavailable",null,"Not resolved by Windows.")));
     private void Write(string message) { Log.AppendText($"[{DateTime.Now:T}] {message}{Environment.NewLine}"); Log.ScrollToEnd(); }
@@ -65,7 +118,7 @@ public partial class MainWindow : Window
     private string SelectedFilter(ComboBox control,string fallback) => control.SelectedItem is ComboBoxItem item ? (string)item.Content : control.SelectedItem as string ?? fallback;
     private void ApplyFilter()
     {
-        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || StateScope==null || ShowPriorityDetails==null || RowStateColumn==null || Summary==null || FilterHint==null) return;
+        if(restoringPreferences || Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || StateScope==null || ShowPriorityDetails==null || RowStateColumn==null || Summary==null || FilterHint==null) return;
         var state=SelectedFilter(StateFilter,"All states");
         var priority=SelectedFilter(PriorityFilter,"All priorities");
         var variant=VariantFilter.Text.Trim();
@@ -74,6 +127,7 @@ public partial class MainWindow : Window
                 var details=ShowPriorityDetails.IsChecked==true;
         var visible=FeaturePresentation.VisibleRows(filtered,details);
         Features.ItemsSource=visible;
+        ViewPreferencesStore.ApplySorts(Features,activeSorts);
         foreach(var column in new[]{RowStateColumn,RowPriorityColumn,RowVariantColumn,PayloadColumn})
             column.Visibility=details ? Visibility.Visible : Visibility.Collapsed;
         Summary.Text=$"{visible.Count:N0} {(details ? "priority rows" : "features")} shown · {rows.Select(r=>r.Id).Distinct().Count():N0} total features · browsing {CurrentStore}";

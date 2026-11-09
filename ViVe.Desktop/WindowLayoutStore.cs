@@ -7,7 +7,7 @@ namespace ViVe.Desktop;
 public record SavedLayout(int Version,double Left,double Top,double Width,double Height,bool Maximized,double TableShare)
 {
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool Valid => Version==1 && new[]{Left,Top,Width,Height,TableShare}.All(double.IsFinite)
+    public bool Valid => (Version==1 || Version==2) && new[]{Left,Top,Width,Height,TableShare}.All(double.IsFinite)
         && Width>=200 && Height>=200 && Width<=32000 && Height<=32000
         && Math.Abs(Left)<1000000 && Math.Abs(Top)<1000000 && TableShare>0 && TableShare<1;
 }

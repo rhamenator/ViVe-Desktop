@@ -80,8 +80,40 @@ internal class Probe {
     maximized.Close();
    }
    if(WindowLayoutStore.Load(temp)?.Maximized!=true) throw new Exception("Closing minimized lost last maximized state.");
+   var prefsPath=System.IO.Path.Combine(System.IO.Path.GetDirectoryName(temp),"view-preferences.json");
+   var prefs=new ViewPreferences(1,"menu",1,1,"Disabled","User","0",true,
+       new(){new("Id",155,DataGridLengthUnitType.Pixel),new("Name",2.4,DataGridLengthUnitType.Star)},
+       new(){new("EffectiveState",System.ComponentModel.ListSortDirection.Ascending),new("Id",System.ComponentModel.ListSortDirection.Descending)});
+   ViewPreferencesStore.Save(prefsPath,prefs);
+   var preferences=WindowLayoutStore.Load(temp);
+   var configured=new MainWindow(temp);
+   var searchBox=(TextBox)configured.FindName("Search");
+   var data=(DataGrid)configured.FindName("Features");
+   if(searchBox.Text!="menu" || ((ComboBox)configured.FindName("Store")).SelectedIndex!=1 ||
+      ((ComboBoxItem)((ComboBox)configured.FindName("StateFilter")).SelectedItem).Content.ToString()!="Disabled" ||
+      ((ComboBox)configured.FindName("PriorityFilter")).SelectedItem.ToString()!="User" ||
+      ((TextBox)configured.FindName("VariantFilter")).Text!="0" ||
+      ((CheckBox)configured.FindName("ShowPriorityDetails")).IsChecked!=true) throw new Exception("Filters were not restored.");
+   if(data.Columns.First(c=>c.SortMemberPath=="Id").Width.Value!=155 ||
+      data.Columns.First(c=>c.SortMemberPath=="Name").Width.UnitType!=DataGridLengthUnitType.Star) throw new Exception("Column widths were not restored.");
+   data.ItemsSource=new List<FeatureRow> {
+       new(10,"Test","Enabled","User",0,0,"Enabled","User"),
+       new(20,"Test","Enabled","User",0,0,"Enabled","User"),
+       new(30,"Test","Disabled","User",0,0,"Disabled","User")};
+   ViewPreferencesStore.ApplySorts(data,prefs.Sorts);
+   if(((FeatureRow)data.Items[0]).Id!=30 || ((FeatureRow)data.Items[1]).Id!=20) throw new Exception("Multicolumn sort was not applied.");
+   searchBox.Text="context";
+   if(!ViewPreferencesStore.ReadSorts(data).SequenceEqual(prefs.Sorts)) throw new Exception("Filter reset the sort order.");
+   configured.Close();
+   var roundtrip=ViewPreferencesStore.Load(prefsPath) ?? throw new Exception("View preferences were not saved.");
+   if(roundtrip.Search!="context" || roundtrip.Store!=1 || !roundtrip.Sorts.SequenceEqual(prefs.Sorts) || !roundtrip.Columns.Any(c=>c.Key=="Id" && c.Width==155)) throw new Exception("View preferences did not survive close.");
+   System.IO.File.WriteAllText(prefsPath,"bad json");
+   if(ViewPreferencesStore.Load(prefsPath)!=null) throw new Exception("Corrupt view settings were accepted.");
+   System.IO.File.Delete(prefsPath);
+   Console.WriteLine("PASS: Restored filters, pixel/star widths, multicolumn sorting, sort preserved across filtering, close/save and corrupt preference fallback.");
    Console.WriteLine("PASS: JSON round trip, corrupt file fallback, monitor recovery, actual window close/reopen, divider restore and maximized normal-bounds preservation.");
   } finally {
+   var preferenceFile=System.IO.Path.Combine(System.IO.Path.GetDirectoryName(temp),"view-preferences.json"); if(System.IO.File.Exists(preferenceFile)) System.IO.File.Delete(preferenceFile);
    if(System.IO.File.Exists(temp)) System.IO.File.Delete(temp);
    if(System.IO.Directory.Exists(System.IO.Path.GetDirectoryName(temp))) System.IO.Directory.Delete(System.IO.Path.GetDirectoryName(temp));
   }

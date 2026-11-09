@@ -217,3 +217,33 @@ Drag the divider to choose your own balance; it is remembered on close.
 Layout tests now include actual window close/reopen, position and size round trips,
 maximized and minimized-state handling, divider persistence, corrupt-file fallback
 and disconnected-monitor recovery. Test windows use temporary settings files.
+
+## Remembered table/filter preferences and version handoff (1.6.0)
+
+Column widths (including pixel/star sizing), all sort descriptions, search text,
+browse store, state scope/state, row priority, variant and priority-detail mode
+are saved on close to %LOCALAPPDATA%\ViVeDesktop\view-preferences.json.
+Sorting is reapplied after filtering, refreshing, changing stores or updating names.
+Column identities use binding property names, rather than display labels.
+
+Preferences are local only. Missing or corrupt settings fall back to defaults;
+unknown column/sort keys are ignored. Layout settings remain separate.
+
+The activity log gets about 36 additional pixels on the first upgrade from the
+older layout format, and its default minimum is 140 pixels. The updated layout
+format prevents that adjustment repeating on later launches. Afterward the
+user's saved divider position is respected.
+
+Version behavior:
+- Same or older version: activate the running window and exit the duplicate.
+- Newer version: request normal close of the older same-user/session product,
+  wait for it to save settings and release the single-instance lock, then open.
+- If an older window is busy or refuses to close, show an explanatory warning
+  and leave it running. It is never force-terminated by the app.
+- Closing is deferred while the current GUI performs an operation.
+
+Verified against the v1.5 window left open by the user: a duplicate v1.5 launch
+retained its original PID; v1.6 then closed v1.5 normally and opened; duplicate v1.6
+and older v1.5 launches both retained the v1.6 PID with only one GUI instance.
+Preference tests cover restoration, multicolumn sort, pixel/star widths,
+filtering without losing sort, close/save and corrupt-file fallback.

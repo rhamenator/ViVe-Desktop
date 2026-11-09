@@ -60,7 +60,7 @@ public sealed class WindowLayoutController : IDisposable
     {
         try {
             if(!normalBounds.IsEmpty && normalBounds.Width>=200 && normalBounds.Height>=200)
-                WindowLayoutStore.Save(path,new(1,normalBounds.Left,normalBounds.Top,normalBounds.Width,normalBounds.Height,lastMaximized,Math.Clamp(tableShare(),.25,.9)));
+                WindowLayoutStore.Save(path,new(2,normalBounds.Left,normalBounds.Top,normalBounds.Width,normalBounds.Height,lastMaximized,Math.Clamp(tableShare(),.25,.9)));
         } catch { /* A failed layout write must not prevent the application from closing. */ }
         Dispose();
     }
