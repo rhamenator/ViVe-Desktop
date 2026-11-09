@@ -1,6 +1,6 @@
 # ViVe Desktop
 
-An English, offline Windows desktop interface built directly on the upstream ViVe library.
+An English Windows desktop interface built directly on the upstream ViVe library.
 Upstream: https://github.com/thebookisclosed/ViVe
 Based on commit 3f8c6a3425983412da1e8b26cd757c3aa17b3f25.
 This is an independent modification, not an official upstream release. GPL-3.0-or-later; see LICENSE.
@@ -26,8 +26,7 @@ specific feature ID before changing it. Restart Windows manually when necessary.
 
 ## Privacy and scope
 
-The GUI references only ViVe and Microsoft desktop libraries. It has no HTTP client,
-telemetry, web view, updater, startup service, or online feature dictionary download.
+The GUI references only ViVe and Microsoft desktop libraries. It connects to GitHub only when you click Update Dictionary. It has no telemetry, web view, background updater, or startup service.
 The original CLI remains separate and retains its explicit upstream update commands.
 This is source-based transparency, not a certification or a comprehensive security audit.
 The GUI covers common state operations; advanced variants, subscriptions, priority
@@ -78,3 +77,35 @@ Added missing symbolic names from a pinned newer feature dump, preserving all
 existing mappings. IDs 61934903 and 60813048 have explicitly marked community
 display labels because no internal symbolic names were available in that dump.
 See Extra/DICTIONARY-SOURCES.md for provenance and limitations.
+
+
+## Dictionary updates and browsing (1.1.0)
+
+- Update Dictionary downloads a text-only feature dump from the public
+  phantomofearth/windows-velocity-feature-lists GitHub repository. It pins reads to
+  one commit and uses the highest versioned rs_prerelease/amd64 list.
+- Only validated symbolic name/ID pairs are merged. Existing entries remain unless
+  the download provides a symbolic name for that ID. Community labels remain
+  explicitly marked until a symbolic name replaces them.
+- No downloads run on startup. GitHub sees the normal request metadata, including
+  your IP address; no feature configurations, snapshots, or search text are sent.
+- Updates are saved to %LOCALAPPDATA%\ViVeDesktop\Dictionary\FeatureDictionary.pfs.
+  The previous saved dictionary is retained as .bak; invalid or failed downloads
+  keep existing names. GitHub rate limits or network failures can be retried later.
+- The top field filters the configured rows by name or ID substring. State,
+  priority and exact variant filters combine. Clear filters restores the full list.
+  Column headings sort the list, including priority and variant. Payload is visible.
+- Go to ID is navigation: exact match first, then prefix and nearest numeric ID.
+  It clears list filters so its result is visible. Press Enter in its ID field to
+  navigate. Selection fills the ID field used by Enable, Disable and Reset.
+- State is per configuration row; multiple priority rows may exist for one ID.
+  A Disabled row is not proof that the effective feature is disabled if another
+  priority overrides it. Variant 0 is a numeric variant, not the disabled state.
+- The new original icon source is Assets/App.svg; multi-resolution App.ico is
+  embedded in the executable and used by the window and shortcuts.
+
+Additional validation:
+    dotnet run --project Tests/Tests.csproj -c Release -- --download
+
+This tests filtering, merge rejection, preservation of community labels, local
+cache reload/backup, and a live text-only download. No Windows feature writes occur.

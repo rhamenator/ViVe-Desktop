@@ -1,6 +1,6 @@
 # Feature dictionary provenance
 
-Updated 2026-11-08. The application remains offline.
+Bundled mappings updated 2026-11-08. The application can refresh names from GitHub when Update Dictionary is clicked; it does not download on startup.
 
 The original mappings from thebookisclosed/ViVe commit
 3f8c6a3425983412da1e8b26cd757c3aa17b3f25 are preserved.

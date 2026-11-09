@@ -11,7 +11,7 @@ using Microsoft.Win32;
 
 namespace ViVe.Desktop;
 
-public record FeatureRow(uint Id, string Name, string State, string Priority, uint Variant, uint Payload);
+
 public partial class MainWindow : Window
 {
     private List<FeatureRow> rows = new();
@@ -22,15 +22,15 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        try
-        {
-            foreach(var line in File.ReadLines(Path.Combine(AppContext.BaseDirectory,"FeatureDictionary.pfs")))
-            {
-                var split = line.LastIndexOf(',');
-                if(split > 0 && uint.TryParse(line[(split+1)..], out var id)) names[id]=line[..split];
-            }
-        }
-        catch(Exception ex) { Write("Dictionary unavailable: "+ex.Message); }
+        PriorityFilter.ItemsSource=new[]{"All priorities"}.Concat(Enum.GetNames<RTL_FEATURE_CONFIGURATION_PRIORITY>()).ToArray();
+        PriorityFilter.SelectedIndex=0;
+        try {
+            foreach(var pair in DictionaryUpdater.Read(Path.Combine(AppContext.BaseDirectory,"FeatureDictionary.pfs"))) names[pair.Key]=pair.Value;
+            if(File.Exists(DictionaryUpdater.CachePath)) {
+                foreach(var pair in DictionaryUpdater.Read(DictionaryUpdater.CachePath)) names[pair.Key]=pair.Value;
+                DictionaryStatus.Text=$"Dictionary: {names.Count:N0} names · saved update from {File.GetLastWriteTime(DictionaryUpdater.CachePath):g}.";
+            } else DictionaryStatus.Text=$"Dictionary: {names.Count:N0} bundled names · Update Dictionary connects to GitHub on request.";
+        } catch(Exception ex) { Write("Dictionary unavailable: "+ex.Message); }
         EnableButton.IsEnabled = DisableButton.IsEnabled = ResetButton.IsEnabled = Admin;
         Write(Admin ? "Administrator access active." : "Read-only session. Use Run as administrator to change features.");
         Loaded += async (_,_) => await LoadFeatures();
@@ -50,15 +50,56 @@ public partial class MainWindow : Window
         } catch(Exception ex) { Write("Query failed: "+ex.Message); }
         finally {busy=false; IsEnabled=true;}
     }
+    private string SelectedFilter(ComboBox control,string fallback) => control.SelectedItem is ComboBoxItem item ? (string)item.Content : control.SelectedItem as string ?? fallback;
     private void ApplyFilter()
     {
-        if(Features == null || Search == null) return;
-        var q=Search.Text.Trim();
-        var filtered=rows.Where(r=>r.Id.ToString().Contains(q) || r.Name.Contains(q,StringComparison.OrdinalIgnoreCase)).ToList();
+        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || Summary==null || FilterHint==null) return;
+        var state=SelectedFilter(StateFilter,"All states");
+        var priority=SelectedFilter(PriorityFilter,"All priorities");
+        var variant=VariantFilter.Text.Trim();
+        var valid=variant.Length==0 || uint.TryParse(variant,System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out var number) && number<=63;
+        var filtered=valid ? rows.Where(r=>FeatureFilter.Matches(r,Search.Text,state,priority,variant)).ToList() : new List<FeatureRow>();
         Features.ItemsSource=filtered;
         Summary.Text=$"{filtered.Count:N0} shown / {rows.Count:N0} configurations · {CurrentStore}";
+        FilterHint.Text=!valid ? "Variant must be a whole number from 0 to 63, or empty for all." :
+            "Click a column heading to sort. The same ID can have multiple priority rows.";
     }
     private void Filter(object s, TextChangedEventArgs e)=>ApplyFilter();
+    private void FilterChanged(object s,SelectionChangedEventArgs e)=>ApplyFilter();
+    private void ClearFilters(object? s,RoutedEventArgs? e)
+    {
+        Search.Clear(); StateFilter.SelectedIndex=0; PriorityFilter.SelectedIndex=0; VariantFilter.Clear(); ApplyFilter();
+    }
+    private void SearchKeyDown(object s,System.Windows.Input.KeyEventArgs e)
+    {
+        if(e.Key==System.Windows.Input.Key.Escape) ClearFilters(null,null);
+    }
+    private void IdKeyDown(object s,System.Windows.Input.KeyEventArgs e)
+    {
+        if(e.Key==System.Windows.Input.Key.Enter) {e.Handled=true; Query(s,e);}
+    }
+    private async void UpdateDictionary(object s,RoutedEventArgs e)
+    {
+        if(busy) return;
+        busy=true; IsEnabled=false; UpdateDictionaryButton.IsEnabled=false;
+        DictionaryStatus.Text="Downloading names from GitHub…";
+        try {
+            var update=await DictionaryUpdater.DownloadAsync(new Dictionary<uint,string>(names));
+            DictionaryUpdater.Save(update,DictionaryUpdater.CachePath);
+            names.Clear();
+            foreach(var pair in update.Names) names[pair.Key]=pair.Value;
+            var selected=Features.SelectedItem as FeatureRow;
+            rows=rows.Select(r=>r with {Name=names.GetValueOrDefault(r.Id,"Name unavailable")}).ToList();
+            ApplyFilter();
+            if(selected!=null) Features.SelectedItem=rows.FirstOrDefault(r=>r.Id==selected.Id && r.Priority==selected.Priority);
+            DictionaryStatus.Text=$"Dictionary: {names.Count:N0} names · updated {DateTime.Now:g} · {update.Changed:N0} added or changed.";
+            Write($"Dictionary updated from {update.SourceFile} at {update.Revision}. {update.Changed:N0} added or changed names. Saved locally; no features changed.");
+        } catch(Exception ex) {
+            DictionaryStatus.Text="Dictionary update failed. Existing names were kept; you can try again.";
+            Write("Dictionary update failed: "+ex.Message);
+        }
+        finally {busy=false; IsEnabled=true; UpdateDictionaryButton.IsEnabled=true;}
+    }
     private void Selected(object s,SelectionChangedEventArgs e) { if(Features.SelectedItem is FeatureRow row) FeatureId.Text=row.Id.ToString(); }
     private async void Refresh(object s,RoutedEventArgs e)=>await LoadFeatures();
     private async void StoreChanged(object s,SelectionChangedEventArgs e) { if(IsLoaded) await LoadFeatures(); }
@@ -80,6 +121,7 @@ public partial class MainWindow : Window
                 var row=Row(config);
                 var existing=rows.FindIndex(r=>r.Id==id && r.Priority==row.Priority); if(existing>=0) rows[existing]=row; else rows.Add(row);
                 rows=rows.OrderBy(r=>r.Id).ToList();
+                ClearFilters(null,null);
                 Search.Text=id.ToString();
                 ApplyFilter();
                 Features.SelectedItem=row;
@@ -99,6 +141,7 @@ public partial class MainWindow : Window
                 if(closest is {} matchId)
                 {
                     var match=rows.First(r=>r.Id==matchId);
+                    ClearFilters(null,null);
                     Search.Text=matchId.ToString();
                     ApplyFilter();
                     Features.SelectedItem=match;

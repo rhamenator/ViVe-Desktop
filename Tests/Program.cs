@@ -37,3 +37,33 @@ Assert(ViVe.Desktop.FeatureLookup.FindClosest(new uint[]{100,110},106)==110,"Nea
 Assert(ViVe.Desktop.FeatureLookup.FindClosest(new uint[]{110,100},105)==100,"Equal distances select lower ID consistently");
 Assert(ViVe.Desktop.FeatureLookup.FindClosest(new uint[]{1,uint.MaxValue},uint.MaxValue-1)==uint.MaxValue,"Numeric distance does not overflow");
 Assert(ViVe.Desktop.FeatureLookup.FindClosest(Array.Empty<uint>(),123)==null,"Empty list has no closest match");
+
+var filterRow=new ViVe.Desktop.FeatureRow(61934903,"Context menu teaching tip","Disabled","User",3,0);
+Assert(ViVe.Desktop.FeatureFilter.Matches(filterRow,"TEACHING","Disabled","User","3"),"Name search is case insensitive and combines all filters");
+Assert(!ViVe.Desktop.FeatureFilter.Matches(filterRow,"6193","Enabled","User","3"),"State filter excludes other states");
+Assert(!ViVe.Desktop.FeatureFilter.Matches(filterRow,"6193","Disabled","Service","3"),"Priority filter excludes other layers");
+Assert(!ViVe.Desktop.FeatureFilter.Matches(filterRow,"6193","Disabled","User","2"),"Variant filter uses exact numeric value");
+Assert(!ViVe.Desktop.FeatureFilter.Matches(filterRow,"","All states","All priorities","oops"),"Invalid variant cannot silently match");
+Assert(ViVe.Desktop.FeatureFilter.Matches(filterRow,"6193","All states","All priorities",""),"Partial ID search combines with unfiltered attributes");
+
+var initialNames=new Dictionary<uint,string> {{61934903,"Teaching tip [community label]"},{1000,"OldName"}};
+var dump=string.Join("\n",Enumerable.Range(1000,101).Select(id=>$"  Feature_{id}: {id}"))+"\n  888888: 888888\n<html>not a name</html>";
+var merged=ViVe.Desktop.DictionaryUpdater.MergeDump(initialNames,dump);
+Assert(merged[61934903]==initialNames[61934903],"Update preserves labels not replaced by symbolic names");
+Assert(merged[1000]=="Feature_1000" && !merged.ContainsKey(888888),"Update refreshes symbolic names and skips numeric placeholders");
+try {ViVe.Desktop.DictionaryUpdater.MergeDump(initialNames,"<html>failure</html>");throw new Exception("Expected invalid download rejection");} catch(InvalidDataException) {Console.WriteLine("PASS: Invalid dictionary download is rejected");}
+var cacheDirectory=Path.Combine(Path.GetTempPath(),"ViVeDictionaryTests-"+Guid.NewGuid());
+Directory.CreateDirectory(cacheDirectory);
+var cachePath=Path.Combine(cacheDirectory,"names.pfs");
+try {
+    var update=new ViVe.Desktop.DictionaryUpdate(merged,"test","test.txt",101);
+    ViVe.Desktop.DictionaryUpdater.Save(update,cachePath);
+    Assert(ViVe.Desktop.DictionaryUpdater.Read(cachePath)[1000]=="Feature_1000","Saved update reloads correctly");
+    ViVe.Desktop.DictionaryUpdater.Save(update with {Names=initialNames},cachePath);
+    Assert(ViVe.Desktop.DictionaryUpdater.Read(cachePath+".bak")[1000]=="Feature_1000","Previous dictionary retained as backup");
+} finally {Directory.Delete(cacheDirectory,true);}
+if(args.Contains("--download")) {
+    var live=await ViVe.Desktop.DictionaryUpdater.DownloadAsync(initialNames);
+    Assert(live.Names.Count>100 && live.Revision.Length==40,"Live GitHub dictionary download validates and merges");
+    Console.WriteLine($"Downloaded {live.SourceFile}, {live.Changed} changes, revision {live.Revision}");
+}
