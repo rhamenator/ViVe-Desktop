@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         Write(Admin ? "Administrator access active." : "Read-only session. Use Run as administrator to change features.");
         Loaded += async (_,_) => await LoadFeatures();
     }
-    private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Unknown"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload);
+    private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload);
     private void Write(string message) { Log.AppendText($"[{DateTime.Now:T}] {message}{Environment.NewLine}"); Log.ScrollToEnd(); }
     private async Task LoadFeatures()
     {
@@ -67,12 +67,49 @@ public partial class MainWindow : Window
         if(!uint.TryParse(FeatureId.Text.Trim(),out var id) || id==0) throw new ArgumentException("Enter a positive 32-bit feature ID.");
         return id;
     }
-    private void Query(object s,RoutedEventArgs e)
+    private async void Query(object s,RoutedEventArgs e)
     {
+        if(busy) return;
         try {
-            var id=ReadId(); var config=FeatureManager.QueryFeatureConfiguration(id,CurrentStore);
-            Write(config is {} c ? JsonSerializer.Serialize(Row(c)) : $"Feature {id}: no configuration returned (absent or query failed).");
-        } catch(Exception ex) {Write(ex.Message);}
+            var id=ReadId();
+            var store=CurrentStore;
+            busy=true; IsEnabled=false;
+            var result=await Task.Run(()=>FeatureLookup.Query(id,store));
+            if(result.Configuration is {} config)
+            {
+                var row=Row(config);
+                rows.RemoveAll(r=>r.Id==id);
+                rows.Add(row);
+                rows=rows.OrderBy(r=>r.Id).ToList();
+                Search.Text=id.ToString();
+                ApplyFilter();
+                Features.SelectedItem=row;
+                Features.ScrollIntoView(row);
+                var nameDetail=names.TryGetValue(id,out var featureName) ? $"Name: {featureName}." : "Name unavailable in the bundled dictionary; the ID was found.";
+                Write($"Found feature {id} in {store}. State: {row.State}. Priority: {row.Priority}. Variant: {row.Variant}. Payload: {row.Payload}. {nameDetail}");
+            }
+            else
+            {
+                var known=names.TryGetValue(id,out var name) ? $"Bundled dictionary: {name}. " : "This ID is not in the bundled dictionary; that dictionary is incomplete. ";
+                var other=result.OtherConfiguration is {} otherConfig
+                    ? $"Found in {result.OtherStore}: {JsonSerializer.Serialize(Row(otherConfig))}. Select that store to inspect it. "
+                    : $"No configuration was returned by {result.OtherStore} either (status 0x{result.OtherStatus:X8}). ";
+                var message=$"Feature {id}: {known}\n{store} returned no configuration (Windows status 0x{result.Status:X8}).\n{other}\nAn ID can be valid without a configuration on this Windows build. This query does not establish that the feature is nonexistent.";
+                Write(message);
+                var closest=FeatureLookup.FindClosest(rows.Select(r=>r.Id),id);
+                if(closest is {} matchId)
+                {
+                    var match=rows.First(r=>r.Id==matchId);
+                    Search.Text=matchId.ToString();
+                    ApplyFilter();
+                    Features.SelectedItem=match;
+                    Features.ScrollIntoView(match);
+                    Write($"No exact configuration for {id} in {store}. Selected closest match {matchId}: {match.Name}, {match.State}, priority {match.Priority}. The Feature ID field now contains {matchId}.");
+                }
+                else MessageBox.Show(this,message,"Feature query result",MessageBoxButton.OK,MessageBoxImage.Information);
+            }
+        } catch(Exception ex) {Write("Query failed: "+ex.Message);}
+        finally {busy=false; IsEnabled=true;}
     }
     private async void EnableFeature(object s,RoutedEventArgs e)=>await Change(RTL_FEATURE_ENABLED_STATE.Enabled,false);
     private async void DisableFeature(object s,RoutedEventArgs e)=>await Change(RTL_FEATURE_ENABLED_STATE.Disabled,false);

@@ -57,3 +57,17 @@ Elevated feature writes and LKG repair were not executed against the host.
 - Added the WPF GUI, read-only default, elevation, confirmation, snapshots and error log.
 
 The upstream commit history and original license are preserved.
+
+## Query ID update (1.0.1)
+
+Successful queries now select the matching row and explicitly say "Found feature",
+with state and priority in readable text. "Name unavailable" means the offline
+dictionary lacks a name, not that Windows lacks the ID.
+Unsuccessful single queries fall back to enumeration, check the other store, and
+show native status codes and dictionary knowledge separately.
+Regression checks query every enumerated ID in both stores without modifying features.
+
+Query ID also navigates to the closest configured ID when no exact configuration
+exists in the selected store: prefix matches first, then numeric distance; ties use
+the lower ID. The selected full ID is shown in the ID field and log. No feature is
+changed by navigation.
