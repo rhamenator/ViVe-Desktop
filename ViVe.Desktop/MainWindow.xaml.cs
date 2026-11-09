@@ -73,7 +73,7 @@ public partial class MainWindow : Window
             column.Visibility=details ? Visibility.Visible : Visibility.Collapsed;
         Summary.Text=$"{visible.Count:N0} {(details ? "priority rows" : "features")} shown · {rows.Select(r=>r.Id).Distinct().Count():N0} total features · browsing {CurrentStore}";
         FilterHint.Text=!valid ? "Variant must be a whole number from 0 to 63, or empty for all." :
-            details ? "Each row is a priority layer. A Disabled default row can coexist with an Enabled User override; Effective state shows the resolved result." : "One row per feature, using the state resolved by Windows. Enable priority details to inspect the underlying layers.";
+            details ? "Priority layers shown; Effective state is the resolved result." : "One row per feature · state resolved by Windows.";
     }
     private void Filter(object s, TextChangedEventArgs e)=>ApplyFilter();
     private void FilterChanged(object s,SelectionChangedEventArgs e)=>ApplyFilter();

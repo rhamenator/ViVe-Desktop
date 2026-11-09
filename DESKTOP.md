@@ -166,3 +166,35 @@ Verification includes read-only Windows queries and injected write-service tests
 The latter check both-store ordering and failure handling without changing the
 host's feature configuration. Reboot-dependent behavior still requires a manual
 post-reboot check on the target Windows build.
+
+## Compact adaptive layout and single instance (1.4.0)
+
+The search field and all five filter dropdowns share an adaptive row at normal
+width. Search starts compact and receives extra width as the window grows.
+Filter controls share spare width up to readable maximum sizes. Narrow windows
+wrap whole labeled controls without overlap.
+
+The initial window is shorter, with a moderate table height and a visible activity
+log. Drag the horizontal divider above Activity log to adjust the table/log split.
+The table and log grow with the window. Explanations use tooltips and the action
+row is compact. Administrator launch, both-store writes, snapshots, effective
+states and the reboot message remain unchanged.
+
+Only one GUI instance runs per user in a Windows session. Launching it again
+requests activation of the existing window, restoring it if minimized, and exits
+the second process. No feature configuration is changed by activation.
+
+The installed update uses a versioned folder so a running elevated older copy
+cannot block file replacement. Desktop and Start menu shortcuts target the new
+executable and keep their administrator flags.
+
+Layout verification at 980x720, 1300x800 and 1800x1100 checks control boundaries,
+overlap, wrapping and growth. The normal-size table is about 296 pixels tall;
+the splitter lets the user choose a different proportion.
+
+To repeat the noninteractive WPF layout checks:
+    dotnet run --project LayoutTests/LayoutTests.csproj -c Release
+
+The layout checks measure/arrange the window content without showing the window
+or writing Windows features. Single-instance startup was also checked by launching
+the installed elevated executable twice and confirming only the first PID remains.
