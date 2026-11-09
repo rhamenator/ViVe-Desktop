@@ -71,3 +71,10 @@ Query ID also navigates to the closest configured ID when no exact configuration
 exists in the selected store: prefix matches first, then numeric distance; ties use
 the lower ID. The selected full ID is shown in the ID field and log. No feature is
 changed by navigation.
+
+## Feature dictionary update (1.0.3)
+
+Added missing symbolic names from a pinned newer feature dump, preserving all
+existing mappings. IDs 61934903 and 60813048 have explicitly marked community
+display labels because no internal symbolic names were available in that dump.
+See Extra/DICTIONARY-SOURCES.md for provenance and limitations.
