@@ -67,3 +67,30 @@ if(args.Contains("--download")) {
     Assert(live.Names.Count>100 && live.Revision.Length==40,"Live GitHub dictionary download validates and merges");
     Console.WriteLine($"Downloaded {live.SourceFile}, {live.Changed} changes, revision {live.Revision}");
 }
+
+var resolvedConfig=new RTL_FEATURE_CONFIGURATION {FeatureId=42,EnabledState=RTL_FEATURE_ENABLED_STATE.Enabled,Priority=RTL_FEATURE_CONFIGURATION_PRIORITY.User};
+var resolved=ViVe.Desktop.EffectiveStates.Interpret(42,RTL_FEATURE_CONFIGURATION_TYPE.Runtime,0,resolvedConfig);
+var disabledRow=new ViVe.Desktop.FeatureRow(42,"Test feature","Disabled","ImageDefault",0,0);
+var effectiveRow=ViVe.Desktop.EffectiveStates.Apply(disabledRow,resolved);
+Assert(effectiveRow.State=="Disabled" && effectiveRow.EffectiveState=="Enabled" && effectiveRow.EffectivePriority=="User","Effective state preserves overridden row and uses Windows result");
+Assert(ViVe.Desktop.FeatureFilter.Matches(effectiveRow,"","Enabled","All priorities","",true),"Effective filter finds enabled feature even on disabled row");
+Assert(!ViVe.Desktop.FeatureFilter.Matches(effectiveRow,"","Disabled","All priorities","",true),"Effective filter excludes overridden disabled state");
+Assert(ViVe.Desktop.FeatureFilter.Matches(effectiveRow,"","Disabled","All priorities","",false),"Individual-row state filter remains available");
+resolvedConfig.EnabledState=RTL_FEATURE_ENABLED_STATE.Default;
+var defaultState=ViVe.Desktop.EffectiveStates.Interpret(42,RTL_FEATURE_CONFIGURATION_TYPE.Runtime,0,resolvedConfig);
+Assert(defaultState.State=="Default" && defaultState.Detail.Contains("not exposed"),"App-defined default is not falsely reported disabled");
+Assert(ViVe.Desktop.EffectiveStates.Interpret(42,RTL_FEATURE_CONFIGURATION_TYPE.Runtime,unchecked((int)0xC0000225),resolvedConfig).State=="Unknown","Failed effective query is not guessed from priority rows");
+Assert(ViVe.Desktop.EffectiveStates.Interpret(999,RTL_FEATURE_CONFIGURATION_TYPE.Runtime,0,resolvedConfig).State=="Unknown","Mismatched effective ID is rejected");
+foreach(var store in Enum.GetValues<RTL_FEATURE_CONFIGURATION_TYPE>()) {
+ var all=FeatureManager.QueryAllFeatureConfigurations(store);
+ var effective=ViVe.Desktop.EffectiveStates.QueryAll(all.Select(c=>c.FeatureId),store);
+ Assert(effective.Count==all.Select(c=>c.FeatureId).Distinct().Count(),"Effective state queried once per distinct ID in "+store);
+ foreach(var pair in effective) {
+  var native=FeatureManager.QueryFeatureConfiguration(pair.Key,store);
+  if(native is {} config && config.EnabledState!=RTL_FEATURE_ENABLED_STATE.Default)
+   if(pair.Value.State!=config.EnabledState.ToString() || pair.Value.Priority!=config.Priority.ToString()) throw new Exception("Effective state does not match Windows for "+pair.Key);
+ }
+ Console.WriteLine($"PASS: Effective states match Windows for {effective.Count} IDs in {store}");
+}
+var tipEffective=ViVe.Desktop.EffectiveStates.Query(61934903,RTL_FEATURE_CONFIGURATION_TYPE.Runtime);
+Console.WriteLine($"61934903 effective: {tipEffective.State}, {tipEffective.Priority}");

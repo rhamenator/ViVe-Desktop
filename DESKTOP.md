@@ -109,3 +109,28 @@ Additional validation:
 
 This tests filtering, merge rejection, preservation of community labels, local
 cache reload/backup, and a live text-only download. No Windows feature writes occur.
+
+## Effective feature states (1.2.0)
+
+The Effective state and Resolved priority columns use Windows'
+RtlQueryFeatureConfiguration result once per distinct ID in the selected store.
+They do not guess by sorting priority rows. The original Row state, Row priority,
+Row variant, and payload remain visible for inspection.
+
+State filtering defaults to Effective state. Switch State applies to to Individual
+row to filter raw override rows. Row priority and Row variant remain row filters.
+All rows for an ID show the same resolved state for the selected store.
+Refresh features, switching stores, Go to ID and successful writes refresh the
+relevant resolved values. Results are snapshots, not live monitoring.
+
+Default means the consuming application's built-in default is not exposed by this
+API; it is not treated as Disabled. Unknown means the query failed or returned
+invalid data; its tooltip includes diagnostic details. Boot-store results do not
+describe the current Runtime store. Enabled configuration does not guarantee the
+corresponding UI is available: Windows may have additional dependencies.
+
+Textbox guide:
+- Search name or ID (contains): filters the visible list by text or partial ID.
+- Row variant (exact number): narrows those results to a specific variant value.
+- Feature ID beside Go to ID: navigates to an exact/prefix/closest ID and selects
+  the target for change actions. It clears list filters so the target is visible.

@@ -16,6 +16,7 @@ public partial class MainWindow : Window
 {
     private List<FeatureRow> rows = new();
     private readonly Dictionary<uint,string> names = new();
+    private Dictionary<uint,EffectiveConfiguration> effective = new();
     private bool busy;
     private bool Admin => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     private RTL_FEATURE_CONFIGURATION_TYPE CurrentStore => Store.SelectedIndex == 1 ? RTL_FEATURE_CONFIGURATION_TYPE.Boot : RTL_FEATURE_CONFIGURATION_TYPE.Runtime;
@@ -35,7 +36,7 @@ public partial class MainWindow : Window
         Write(Admin ? "Administrator access active." : "Read-only session. Use Run as administrator to change features.");
         Loaded += async (_,_) => await LoadFeatures();
     }
-    private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload);
+    private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => EffectiveStates.Apply(new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload),effective.GetValueOrDefault(c.FeatureId,new("Unknown","Unavailable",null,"Not resolved by Windows.")));
     private void Write(string message) { Log.AppendText($"[{DateTime.Now:T}] {message}{Environment.NewLine}"); Log.ScrollToEnd(); }
     private async Task LoadFeatures()
     {
@@ -43,9 +44,15 @@ public partial class MainWindow : Window
         busy=true; IsEnabled=false;
         var store=CurrentStore;
         try {
-            var configs=await Task.Run(()=>FeatureManager.QueryAllFeatureConfigurations(store));
+                        var snapshot=await Task.Run(()=> {
+                var configs=FeatureManager.QueryAllFeatureConfigurations(store);
+                var resolved=EffectiveStates.QueryAll(configs?.Select(c=>c.FeatureId) ?? Enumerable.Empty<uint>(),store);
+                return (Configs:configs,Effective:resolved);
+            });
+            var configs=snapshot.Configs;
+            effective=snapshot.Effective;
             if(configs == null) { rows.Clear(); Write("No configurations returned. The store may be empty or unavailable."); }
-            else { rows=configs.Select(Row).OrderBy(r=>r.Id).ToList(); Write($"Loaded {rows.Count} configurations from {store}."); }
+            else { rows=configs.Select(Row).OrderBy(r=>r.Id).ToList(); Write($"Loaded {rows.Count} configurations from {store}. Effective states resolved by Windows for {effective.Count} distinct IDs."); }
             ApplyFilter();
         } catch(Exception ex) { Write("Query failed: "+ex.Message); }
         finally {busy=false; IsEnabled=true;}
@@ -53,22 +60,22 @@ public partial class MainWindow : Window
     private string SelectedFilter(ComboBox control,string fallback) => control.SelectedItem is ComboBoxItem item ? (string)item.Content : control.SelectedItem as string ?? fallback;
     private void ApplyFilter()
     {
-        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || Summary==null || FilterHint==null) return;
+        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || StateScope==null || Summary==null || FilterHint==null) return;
         var state=SelectedFilter(StateFilter,"All states");
         var priority=SelectedFilter(PriorityFilter,"All priorities");
         var variant=VariantFilter.Text.Trim();
         var valid=variant.Length==0 || uint.TryParse(variant,System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out var number) && number<=63;
-        var filtered=valid ? rows.Where(r=>FeatureFilter.Matches(r,Search.Text,state,priority,variant)).ToList() : new List<FeatureRow>();
+        var filtered=valid ? rows.Where(r=>FeatureFilter.Matches(r,Search.Text,state,priority,variant,StateScope.SelectedIndex==0)).ToList() : new List<FeatureRow>();
         Features.ItemsSource=filtered;
         Summary.Text=$"{filtered.Count:N0} shown / {rows.Count:N0} configurations · {CurrentStore}";
         FilterHint.Text=!valid ? "Variant must be a whole number from 0 to 63, or empty for all." :
-            "Click a column heading to sort. The same ID can have multiple priority rows.";
+            "Effective state is resolved by Windows for this store. Row state and priority show each individual configuration.";
     }
     private void Filter(object s, TextChangedEventArgs e)=>ApplyFilter();
     private void FilterChanged(object s,SelectionChangedEventArgs e)=>ApplyFilter();
     private void ClearFilters(object? s,RoutedEventArgs? e)
     {
-        Search.Clear(); StateFilter.SelectedIndex=0; PriorityFilter.SelectedIndex=0; VariantFilter.Clear(); ApplyFilter();
+        Search.Clear(); StateFilter.SelectedIndex=0; PriorityFilter.SelectedIndex=0; VariantFilter.Clear(); StateScope.SelectedIndex=0; ApplyFilter();
     }
     private void SearchKeyDown(object s,System.Windows.Input.KeyEventArgs e)
     {
@@ -115,7 +122,10 @@ public partial class MainWindow : Window
             var id=ReadId();
             var store=CurrentStore;
             busy=true; IsEnabled=false;
-            var result=await Task.Run(()=>FeatureLookup.Query(id,store));
+            var queryResult=await Task.Run(()=> (Lookup:FeatureLookup.Query(id,store),Effective:EffectiveStates.Query(id,store)));
+            var result=queryResult.Lookup;
+            effective[id]=queryResult.Effective;
+            rows=rows.Select(r=>r.Id==id ? EffectiveStates.Apply(r,queryResult.Effective) : r).ToList();
             if(result.Configuration is {} config)
             {
                 var row=Row(config);
@@ -127,7 +137,7 @@ public partial class MainWindow : Window
                 Features.SelectedItem=row;
                 Features.ScrollIntoView(row);
                 var nameDetail=names.TryGetValue(id,out var featureName) ? $"Name: {featureName}." : "Name unavailable in the bundled dictionary; the ID was found.";
-                Write($"Found feature {id} in {store}. State: {row.State}. Priority: {row.Priority}. Variant: {row.Variant}. Payload: {row.Payload}. {nameDetail}");
+                Write($"Found feature {id} in {store}. Effective state: {row.EffectiveState} ({row.EffectivePriority}). Row state: {row.State}. Row priority: {row.Priority}. Variant: {row.Variant}. Payload: {row.Payload}. {nameDetail}");
             }
             else
             {
