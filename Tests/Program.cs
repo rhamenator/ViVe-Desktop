@@ -94,3 +94,22 @@ foreach(var store in Enum.GetValues<RTL_FEATURE_CONFIGURATION_TYPE>()) {
 }
 var tipEffective=ViVe.Desktop.EffectiveStates.Query(61934903,RTL_FEATURE_CONFIGURATION_TYPE.Runtime);
 Console.WriteLine($"61934903 effective: {tipEffective.State}, {tipEffective.Priority}");
+
+var changeUpdate=new RTL_FEATURE_CONFIGURATION_UPDATE {FeatureId=61934903,Priority=RTL_FEATURE_CONFIGURATION_PRIORITY.User,EnabledState=RTL_FEATURE_ENABLED_STATE.Enabled,Operation=RTL_FEATURE_CONFIGURATION_OPERATION.FeatureState};
+var writeOrder=new List<RTL_FEATURE_CONFIGURATION_TYPE>();
+int markerCalls=0;
+var bothSaved=ViVe.Desktop.FeatureChanges.SaveBoth(changeUpdate,(u,store)=>{Assert(u.FeatureId==61934903 && u.Priority==RTL_FEATURE_CONFIGURATION_PRIORITY.User,"Write keeps requested ID and User priority");writeOrder.Add(store);return 0;},()=>{markerCalls++;return 0;});
+Assert(bothSaved.Saved && markerCalls==1 && writeOrder.SequenceEqual(new[]{RTL_FEATURE_CONFIGURATION_TYPE.Runtime,RTL_FEATURE_CONFIGURATION_TYPE.Boot}),"Default change saves Runtime then Boot and marks BootPending");
+writeOrder.Clear();markerCalls=0;
+var runtimeFailed=ViVe.Desktop.FeatureChanges.SaveBoth(changeUpdate,(u,store)=>{writeOrder.Add(store);return -1;},()=>{markerCalls++;return 0;});
+Assert(!runtimeFailed.Saved && runtimeFailed.BootStatus==null && markerCalls==0 && writeOrder.Count==1,"Runtime failure prevents Boot write and success notice");
+writeOrder.Clear();markerCalls=0;
+var bootFailed=ViVe.Desktop.FeatureChanges.SaveBoth(changeUpdate,(u,store)=>{writeOrder.Add(store);return store==RTL_FEATURE_CONFIGURATION_TYPE.Boot ? -2 : 0;},()=>{markerCalls++;return 0;});
+Assert(!bootFailed.Saved && bootFailed.RuntimeStatus==0 && markerCalls==0 && bootFailed.Description.Contains("partially"),"Partial Runtime success and Boot failure reported honestly");
+var markFailed=ViVe.Desktop.FeatureChanges.SaveBoth(changeUpdate,(u,store)=>0,()=>-3);
+Assert(markFailed.Saved && markFailed.BootMarkerStatus==-3 && markFailed.Description.Contains("boot-status"),"Boot marker failure retained separately from saved overrides");
+var userLayer=effectiveRow with {Priority="User",State="Enabled"};
+var defaultLayer=effectiveRow with {Priority="ImageDefault",State="Disabled"};
+var summaryRows=ViVe.Desktop.FeaturePresentation.VisibleRows(new[]{defaultLayer,userLayer},false);
+Assert(summaryRows.Count==1 && summaryRows[0].Priority=="User" && summaryRows[0].EffectiveState=="Enabled","Default view shows one resolved row instead of contradictory priority rows");
+Assert(ViVe.Desktop.FeaturePresentation.VisibleRows(new[]{defaultLayer,userLayer},true).Count==2,"Advanced view retains original priority layers");

@@ -33,7 +33,7 @@ public partial class MainWindow : Window
             } else DictionaryStatus.Text=$"Dictionary: {names.Count:N0} bundled names · Update Dictionary connects to GitHub on request.";
         } catch(Exception ex) { Write("Dictionary unavailable: "+ex.Message); }
         EnableButton.IsEnabled = DisableButton.IsEnabled = ResetButton.IsEnabled = Admin;
-        Write(Admin ? "Administrator access active." : "Read-only session. Use Run as administrator to change features.");
+        Write("Administrator access active. Changes are saved to both Runtime and Boot. Restart Windows after changing features.");
         Loaded += async (_,_) => await LoadFeatures();
     }
     private FeatureRow Row(RTL_FEATURE_CONFIGURATION c) => EffectiveStates.Apply(new(c.FeatureId, names.GetValueOrDefault(c.FeatureId,"Name unavailable"),c.EnabledState.ToString(),c.Priority.ToString(),c.Variant,c.VariantPayload),effective.GetValueOrDefault(c.FeatureId,new("Unknown","Unavailable",null,"Not resolved by Windows.")));
@@ -60,19 +60,24 @@ public partial class MainWindow : Window
     private string SelectedFilter(ComboBox control,string fallback) => control.SelectedItem is ComboBoxItem item ? (string)item.Content : control.SelectedItem as string ?? fallback;
     private void ApplyFilter()
     {
-        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || StateScope==null || Summary==null || FilterHint==null) return;
+        if(Features==null || Search==null || StateFilter==null || PriorityFilter==null || VariantFilter==null || StateScope==null || ShowPriorityDetails==null || RowStateColumn==null || Summary==null || FilterHint==null) return;
         var state=SelectedFilter(StateFilter,"All states");
         var priority=SelectedFilter(PriorityFilter,"All priorities");
         var variant=VariantFilter.Text.Trim();
         var valid=variant.Length==0 || uint.TryParse(variant,System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out var number) && number<=63;
         var filtered=valid ? rows.Where(r=>FeatureFilter.Matches(r,Search.Text,state,priority,variant,StateScope.SelectedIndex==0)).ToList() : new List<FeatureRow>();
-        Features.ItemsSource=filtered;
-        Summary.Text=$"{filtered.Count:N0} shown / {rows.Count:N0} configurations · {CurrentStore}";
+                var details=ShowPriorityDetails.IsChecked==true;
+        var visible=FeaturePresentation.VisibleRows(filtered,details);
+        Features.ItemsSource=visible;
+        foreach(var column in new[]{RowStateColumn,RowPriorityColumn,RowVariantColumn,PayloadColumn})
+            column.Visibility=details ? Visibility.Visible : Visibility.Collapsed;
+        Summary.Text=$"{visible.Count:N0} {(details ? "priority rows" : "features")} shown · {rows.Select(r=>r.Id).Distinct().Count():N0} total features · browsing {CurrentStore}";
         FilterHint.Text=!valid ? "Variant must be a whole number from 0 to 63, or empty for all." :
-            "Effective state is resolved by Windows for this store. Row state and priority show each individual configuration.";
+            details ? "Each row is a priority layer. A Disabled default row can coexist with an Enabled User override; Effective state shows the resolved result." : "One row per feature, using the state resolved by Windows. Enable priority details to inspect the underlying layers.";
     }
     private void Filter(object s, TextChangedEventArgs e)=>ApplyFilter();
     private void FilterChanged(object s,SelectionChangedEventArgs e)=>ApplyFilter();
+    private void DetailsChanged(object s,RoutedEventArgs e)=>ApplyFilter();
     private void ClearFilters(object? s,RoutedEventArgs? e)
     {
         Search.Clear(); StateFilter.SelectedIndex=0; PriorityFilter.SelectedIndex=0; VariantFilter.Clear(); StateScope.SelectedIndex=0; ApplyFilter();
@@ -168,44 +173,46 @@ public partial class MainWindow : Window
     private async void ResetFeature(object s,RoutedEventArgs e)=>await Change(RTL_FEATURE_ENABLED_STATE.Default,true);
     private async Task Change(RTL_FEATURE_ENABLED_STATE state,bool reset)
     {
+        if(busy) return;
+        bool attempted=false;
         try {
             if(!Admin) throw new InvalidOperationException("Administrator access is required.");
-            var id=ReadId(); var store=CurrentStore;
+            var id=ReadId();
             var action=reset ? "Remove the User-priority override for" : $"Set {state} for";
-            if(MessageBox.Show(this,$"{action} feature {id} in the {store} store?\n\nOther priorities are preserved. A restart may be needed.","Confirm feature change",MessageBoxButton.OKCancel,MessageBoxImage.Warning)!=MessageBoxResult.OK) return;
-            // Persist a pre-change diagnostic snapshot before calling any write API.
+            if(MessageBox.Show(this,$"{action} feature {id} in BOTH Runtime and Boot?\n\nThe browsing-store selector does not limit changes. Other priorities are preserved. You must reboot Windows for restart-dependent features to take effect.","Confirm feature change",MessageBoxButton.OKCancel,MessageBoxImage.Warning)!=MessageBoxResult.OK) return;
+            busy=true; IsEnabled=false;
             var folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ViVeDesktop","Snapshots");
             Directory.CreateDirectory(folder);
-            var path=Path.Combine(folder,$"{DateTime.UtcNow:yyyyMMdd-HHmmss-fffffff}-{store}.json");
-            SaveSnapshot(path);
+            var prefix=Path.Combine(folder,$"{DateTime.UtcNow:yyyyMMdd-HHmmss-fffffff}");
+            // Capture BOTH stores before either one is changed.
+            SaveSnapshot(prefix+"-Runtime.json",RTL_FEATURE_CONFIGURATION_TYPE.Runtime);
+            SaveSnapshot(prefix+"-Boot.json",RTL_FEATURE_CONFIGURATION_TYPE.Boot);
             var update=new RTL_FEATURE_CONFIGURATION_UPDATE {FeatureId=id,Priority=RTL_FEATURE_CONFIGURATION_PRIORITY.User,EnabledState=state,Operation=reset ? RTL_FEATURE_CONFIGURATION_OPERATION.ResetState : RTL_FEATURE_CONFIGURATION_OPERATION.FeatureState};
-            var result=FeatureManager.SetFeatureConfigurations(new[]{update},store);
-            if(result!=0) throw new InvalidOperationException($"Feature change failed: 0x{result:X8}. Snapshot: {path}");
-            Write($"Changed {id} in {store}. Pre-change snapshot: {path}");
-            if(store==RTL_FEATURE_CONFIGURATION_TYPE.Boot) {
-                var status=FeatureManager.GetBootFeatureConfigurationState(out var current);
-                if(unchecked((uint)status)==0xC0000034) status=FeatureManager.InitializeBootStatusDataFile();
-                if(status==0) status=FeatureManager.SetBootFeatureConfigurationState(BSD_FEATURE_CONFIGURATION_STATE.BootPending);
-                if(status!=0) Write($"Feature override saved, but boot status update failed: 0x{status:X8}.");
+            attempted=true;
+            var result=await Task.Run(()=>FeatureChanges.SaveBoth(update));
+            Write($"Feature {id}: {result.Description} Pre-change snapshots: {prefix}-Runtime.json and {prefix}-Boot.json");
+            if(!result.Saved) {
+                MessageBox.Show(this,result.Description+"\n\nThe change was not fully saved. See the activity log and snapshots.","Feature change failed",MessageBoxButton.OK,MessageBoxImage.Error);
+                return;
             }
-            await LoadFeatures();
+            RestartNotice.Text="Restart required: reboot Windows to apply feature changes.";
+            MessageBox.Show(this,$"Feature {id} was saved to Runtime and Boot.\n\nREBOOT WINDOWS for this change to take full effect.\n\n{(result.BootMarkerStatus!=0 ? result.Description+"\n\n" : "")}Windows will not restart automatically.","Restart required",MessageBoxButton.OK,MessageBoxImage.Exclamation);
         } catch(Exception ex) { Write(ex.Message); MessageBox.Show(this,ex.Message,"Unable to complete change",MessageBoxButton.OK,MessageBoxImage.Error); }
+        finally {
+            busy=false; IsEnabled=true;
+            if(attempted) await LoadFeatures();
+        }
     }
-    private void SaveSnapshot(string path)
+    private void SaveSnapshot(string path,RTL_FEATURE_CONFIGURATION_TYPE? requestedStore=null)
     {
-        var configs=FeatureManager.QueryAllFeatureConfigurations(CurrentStore) ?? throw new InvalidOperationException("Cannot capture a snapshot: store query returned no data.");
-        File.WriteAllText(path,JsonSerializer.Serialize(new {FormatVersion=1,CreatedUtc=DateTime.UtcNow,WindowsBuild=Environment.OSVersion.Version.ToString(),Store=CurrentStore.ToString(),Configurations=configs.Select(c=>new {c.FeatureId,c.CompactState,c.VariantPayload})},new JsonSerializerOptions {WriteIndented=true}));
+        var store=requestedStore ?? CurrentStore;
+        var configs=FeatureManager.QueryAllFeatureConfigurations(store) ?? throw new InvalidOperationException("Cannot capture a snapshot: store query returned no data.");
+        File.WriteAllText(path,JsonSerializer.Serialize(new {FormatVersion=1,CreatedUtc=DateTime.UtcNow,WindowsBuild=Environment.OSVersion.Version.ToString(),Store=store.ToString(),Configurations=configs.Select(c=>new {c.FeatureId,c.CompactState,c.VariantPayload})},new JsonSerializerOptions {WriteIndented=true}));
     }
     private void Export(object s,RoutedEventArgs e)
     {
         var dialog=new SaveFileDialog {Filter="JSON snapshot|*.json",FileName=$"ViVe-{CurrentStore}-{DateTime.Now:yyyyMMdd-HHmmss}.json"};
         if(dialog.ShowDialog(this)!=true) return;
         try {SaveSnapshot(dialog.FileName); Write("Exported "+dialog.FileName);} catch(Exception ex) {Write("Export failed: "+ex.Message);}
-    }
-    private void Elevate(object s,RoutedEventArgs e)
-    {
-        if(Admin) {Write("Already running as administrator."); return;}
-        try {Process.Start(new ProcessStartInfo(Environment.ProcessPath!) {UseShellExecute=true,Verb="runas"}); Close();}
-        catch(Exception ex) {Write("Administrator launch canceled or failed: "+ex.Message);}
     }
 }

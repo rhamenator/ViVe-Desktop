@@ -9,11 +9,11 @@ This is an independent modification, not an official upstream release. GPL-3.0-o
 
 Open ViVe.Desktop.exe from the portable release folder. Keep the entire folder together.
 The x64 GUI includes .NET 10 and needs no separate runtime installation.
-It starts read-only. Run as administrator requests Windows elevation when you choose it.
+The executable requires administrator access at launch. Desktop and Start menu shortcuts also request elevation. Accept the Windows UAC prompt; elevation lasts until the application process exits.
 
 Search by ID or internal name, select a row or enter a positive ID, and query, enable,
-disable, or reset its User-priority override. Choose Runtime or Boot explicitly.
-Reset removes only the User override in the selected store. Higher-priority overrides
+disable, or reset its User-priority override in BOTH Runtime and Boot. The store selector chooses what to inspect, not where writes go.
+Reset removes only the User override in both stores. Higher-priority overrides
 can mask a User change. Internal names come from the bundled upstream dictionary and
 may be unknown or outdated on newer Windows builds.
 
@@ -134,3 +134,35 @@ Textbox guide:
 - Row variant (exact number): narrows those results to a specific variant value.
 - Feature ID beside Go to ID: navigates to an exact/prefix/closest ID and selects
   the target for change actions. It clears list filters so the target is visible.
+
+
+## Persistent changes, elevation and restart notice (1.3.0)
+
+- The GUI manifest now requires administrator access. Its startup guard rejects
+  non-elevated direct DLL launches. The elevation button is removed.
+- Desktop and Start menu shortcuts have the RunAsUser flag. The elevated GUI is
+  the main app process, rather than a temporary privileged helper. UAC remains
+  under Windows' control; canceling elevation prevents the GUI from starting.
+- Enable, Disable and Reset now match the CLI default: Runtime first, then Boot,
+  followed by BootPending status. The browse-store selector never limits writes.
+  This fixes the old default that wrote Runtime only, which could be lost at restart.
+- Pre-change diagnostic snapshots capture BOTH stores before any write. Runtime
+  changes and the persistent User-priority registry override are read back after
+  writes; a failure is reported rather than falsely saying everything succeeded.
+  The operation is not transactional: Runtime can succeed while Boot fails, and
+  this partial outcome is explicitly reported.
+- Success displays a Restart required message box with the exclamation icon and
+  a persistent reminder. Reboot Windows manually; the application never restarts
+  the computer automatically. A saved/enabled configuration is not proof that the
+  associated Windows interface has activated before reboot or that all feature
+  dependencies are met.
+- The default table shows one resolved row per ID. Show individual priority rows
+  (advanced) reveals the underlying layers. An Enabled User layer and Disabled
+  ImageDefault layer for one ID are expected, not duplicate failed changes.
+- Installation in the system drive root is not required by our implementation:
+  it calls the same ViVe native/registry APIs directly, independent of working directory.
+
+Verification includes read-only Windows queries and injected write-service tests.
+The latter check both-store ordering and failure handling without changing the
+host's feature configuration. Reboot-dependent behavior still requires a manual
+post-reboot check on the target Windows build.
